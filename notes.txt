@@ -1,1 +1,4 @@
 streamlit run apps/streamlit/app.py --server.port 8501
+
+# embedding model
+https://huggingface.co/nomic-ai/nomic-embed-text-v1.5

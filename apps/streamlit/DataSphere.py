@@ -63,7 +63,8 @@ if selected in Upload_list:
         if st.session_state.get("last_file_id") != current_file_id:
             st.session_state["last_file_id"] = current_file_id
 
-        
+            # Clean up old uploads
+            cleanup_uploaded_files()
        
             status, file_name = process_uploaded_file(uploaded_file)
             if status == "Pass":
