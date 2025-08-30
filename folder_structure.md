@@ -13,6 +13,9 @@ askmydb/
 │        └─ chart_viewer.py
 ├─ core/                          # all business logic (framework-agnostic)
 │  ├─ __init__.py
+|  |─ global_settings.py
+|  |─ upload_processing/
+│  │  ├─ upload_files.py          # processing uploaded files
 │  ├─ config/
 │  │  ├─ settings.py              # pydantic settings (LLM keys, limits)
 │  │  └─ prompts/                 # few-shot, system prompts, guardrails msgs

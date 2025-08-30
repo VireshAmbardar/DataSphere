@@ -1,5 +1,5 @@
 [project]
-name = "astradb"
+name = "DataSphere"
 version = "0.1.0"
 description = ""
 authors = [
@@ -11,12 +11,17 @@ dependencies = [
     "streamlit (>=1.49.1,<2.0.0)",
     "sqlalchemy (>=2.0.43,<3.0.0)",
     "pydantic (>=2.11.7,<3.0.0)",
-    "pandas (>=2.3.2,<3.0.0)",
     "plotly (>=6.3.0,<7.0.0)",
-    "langchain (>=0.3.27,<0.4.0)"
+    "langchain (>=0.3.27,<0.4.0)",
+    "streamlit-autorefresh (>=1.0.1,<2.0.0)",
+    "chromadb (>=1.0.20,<2.0.0)",
+    "llama-index (>=0.13.3,<0.14.0)"
 ]
 
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+package-mode = false

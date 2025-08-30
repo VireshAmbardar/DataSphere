@@ -1,0 +1,1 @@
+streamlit run apps/streamlit/app.py --server.port 8501

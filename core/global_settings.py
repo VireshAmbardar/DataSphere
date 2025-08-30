@@ -1,0 +1,1 @@
+UPLOAD_FILE_DIR = r"core\cache\files"
