@@ -36,6 +36,14 @@ items = [
     ("Postgres", ":material/database:"),
 ]
 
+# ✅ Initialize session_state keys early
+for k, v in {
+    "selected_source": None,
+    "last_file_id": None,
+    "processed_file": None,
+}.items():
+    st.session_state.setdefault(k, v)
+
 cols_per_row = 3
 
 # ✅ Render buttons in grid layout
@@ -43,21 +51,26 @@ cols_per_row = 3
 cols = st.columns(len(items))
 for col, (label, icon) in zip(cols, items):
     with col:
-        if st.button(label, key=label, icon=icon, use_container_width=True):
+        if st.button(label, key=f"src_{label}", icon=icon, use_container_width=True):
             st.session_state["selected_source"] = label
 
 # ✅ Handle selected source safely
 selected = st.session_state.get("selected_source")
-Upload_list = ["PDF","DOCX","CSV"]
-if selected in Upload_list:
+UPLOAD_MAP = {
+    "PDF":  (["pdf"],  "Upload PDF"),
+    "DOCX": (["docx"], "Upload DOCX"),
+    "CSV":  (["csv"],  "Upload CSV"),
+}
+if selected in UPLOAD_MAP:
+    exts, prompt = UPLOAD_MAP[selected]
 
     # take file from user
-    uploaded_file = st.file_uploader("Upload PDF", type=[selected.lower()])
+    uploaded_file = st.file_uploader(f"Upload {prompt}", type=exts)
 
 
     if uploaded_file:
         # get file id
-        current_file_id = uploaded_file.file_id
+        current_file_id = getattr(uploaded_file, "file_id", f"{uploaded_file.name}:{uploaded_file.size}")
 
         # Only process if new file
         if st.session_state.get("last_file_id") != current_file_id:
@@ -73,6 +86,8 @@ if selected in Upload_list:
 
                 # redirect to Ask Questions page
                 st.switch_page("pages/ask_questions.py")
+            else:
+                st.error(f"Failed to process file: {status} ({file_name})")
 
 
         else:
