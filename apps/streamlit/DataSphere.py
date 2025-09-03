@@ -1,16 +1,18 @@
+import os
+import sys
 import streamlit as st
-import os,sys
+
+# make repo root importable
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
-from core.upload_processing.upload_files import process_uploaded_file,cleanup_uploaded_files
 
-# ✅ Clear cache safely
-st.cache_data.clear()
-st.cache_resource.clear()
+from core.upload_processing.upload_files import process_uploaded_file
+# from core.upload_processing.upload_files import cleanup_uploaded_files  # keep if you want a manual "clear" button
 
-# ✅ App title
-st.title("Welcome to _DataSphere_ is :blue[cool] :sunglasses:")
+# ────────────────────────────────────────────────────────────────────────────────
+# Header
+# ────────────────────────────────────────────────────────────────────────────────
+st.title("Welcome to _DataSphere_:blue[cool]")
 
-# ✅ Description
 st.markdown(
     """
     <h3 style='text-align: center; font-size: 24px;'>
@@ -27,7 +29,17 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ✅ Data sources
+# ────────────────────────────────────────────────────────────────────────────────
+# Session defaults (kept minimal; process_uploaded_file will set these too)
+# ────────────────────────────────────────────────────────────────────────────────
+st.session_state.setdefault("selected_source", None)
+st.session_state.setdefault("last_file_id", None)          # will hold file_key
+st.session_state.setdefault("original_filename", None)
+st.session_state.setdefault("processed_file", None)
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Source selection
+# ────────────────────────────────────────────────────────────────────────────────
 items = [
     ("PDF", ":material/picture_as_pdf:"),
     ("DOCX", ":material/docs:"),
@@ -36,61 +48,58 @@ items = [
     ("Postgres", ":material/database:"),
 ]
 
-# ✅ Initialize session_state keys early
-for k, v in {
-    "selected_source": None,
-    "last_file_id": None,
-    "processed_file": None,
-}.items():
-    st.session_state.setdefault(k, v)
-
-cols_per_row = 3
-
-# ✅ Render buttons in grid layout
-# Source selection
 cols = st.columns(len(items))
 for col, (label, icon) in zip(cols, items):
     with col:
         if st.button(label, key=f"src_{label}", icon=icon, use_container_width=True):
             st.session_state["selected_source"] = label
 
-# ✅ Handle selected source safely
+# ────────────────────────────────────────────────────────────────────────────────
+# Upload widgets for file-backed sources
+# ────────────────────────────────────────────────────────────────────────────────
 selected = st.session_state.get("selected_source")
 UPLOAD_MAP = {
     "PDF":  (["pdf"],  "Upload PDF"),
     "DOCX": (["docx"], "Upload DOCX"),
     "CSV":  (["csv"],  "Upload CSV"),
 }
+
 if selected in UPLOAD_MAP:
     exts, prompt = UPLOAD_MAP[selected]
 
-    # take file from user
-    uploaded_file = st.file_uploader(f"Upload {prompt}", type=exts)
-
-
+    uploaded_file = st.file_uploader(f"{prompt}", type=exts)
     if uploaded_file:
-        # get file id
-        current_file_id = getattr(uploaded_file, "file_id", f"{uploaded_file.name}:{uploaded_file.size}")
+        # Always call process_uploaded_file — it will:
+        # 1) compute a stable file_key from bytes
+        # 2) check Chroma for existing chunks (where={"file_key": file_key})
+        # 3) skip parsing/embedding if already cached
+        # 4) set session: original_filename, last_file_id (file_key)
+        status, fname = process_uploaded_file(uploaded_file)
 
-        # Only process if new file
-        if st.session_state.get("last_file_id") != current_file_id:
-            st.session_state["last_file_id"] = current_file_id
-
-            # Clean up old uploads
-            cleanup_uploaded_files()
-       
-            status, file_name = process_uploaded_file(uploaded_file)
-            if status == "Pass":
-                st.session_state["processed_file"] = file_name
-                # print("Enjoy")   # will run only once
-
-                # redirect to Ask Questions page
-                st.switch_page("pages/ask_questions.py")
-            else:
-                st.error(f"Failed to process file: {status} ({file_name})")
-
-
+        if status == "Pass":
+            st.session_state["processed_file"] = fname  # human-friendly name
+            # navigate to chat page
+            st.switch_page("pages/ask_questions.py")
         else:
-            st.info(f"Already processed: {st.session_state['processed_file']}")
+            st.error(f"Failed to process file: {status} ({fname})")
 
+else:
+    st.info("Pick a data source above to begin.")
 
+# ────────────────────────────────────────────────────────────────────────────────
+# Optional: quick status block
+# ────────────────────────────────────────────────────────────────────────────────
+# with st.expander("Current session status", expanded=False):
+#     st.write({
+#         "selected_source": st.session_state.get("selected_source"),
+#         "original_filename": st.session_state.get("original_filename"),
+#         "last_file_id (file_key)": st.session_state.get("last_file_id"),
+#         "processed_file": st.session_state.get("processed_file"),
+#     })
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Optional: manual cleanup button (if you implemented cleanup_uploaded_files)
+# ────────────────────────────────────────────────────────────────────────────────
+# if st.button("Clear uploaded file cache from disk", type="secondary"):
+#     cleanup_uploaded_files()
+#     st.success("Local uploaded files cleaned from disk.")

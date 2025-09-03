@@ -9,7 +9,7 @@ import streamlit as st
 import torch
 from loguru import logger
 
-from core.global_settings import UPLOAD_FILE_DIR, HUGGING_FACE_CACHING, CHROMADB_CACHE_DIR
+from core.global_settings import UPLOAD_FILE_DIR, HUGGING_FACE_CACHING
 
 # ---- Loaders / chunking ----
 from langchain_community.document_loaders import CSVLoader
@@ -24,12 +24,23 @@ from docling.chunking import HybridChunker
 # ---- Embeddings ----
 from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer
+import hashlib
 
-# ---- Vector store ----
-import chromadb
+#Chromadb client and collection
+from core.utils.chromadb import _get_chroma_collection
 
 # Ensure upload dir exists
 os.makedirs(UPLOAD_FILE_DIR, exist_ok=True)
+
+
+# =========================
+# OPTIMIZED: device pick
+# =========================
+def _file_key(uploaded_file) -> str:
+    """Stable fingerprint for a file based on its raw bytes."""
+    # read bytes without consuming the stream for later use
+    data = uploaded_file.getvalue()  # Streamlit uploader supports this
+    return hashlib.sha1(data).hexdigest()
 
 # =========================
 # OPTIMIZED: device pick
@@ -72,7 +83,10 @@ def _get_tokenizer(name: str = "bert-base-uncased") -> AutoTokenizer:
     """Singleton-ish loader for docling chunker tokenizer."""
     global _TOKENIZER
     if _TOKENIZER is None:
-        _TOKENIZER = AutoTokenizer.from_pretrained(name, cache_dir=HUGGING_FACE_CACHING)
+        _TOKENIZER = AutoTokenizer.from_pretrained(name, cache_dir=HUGGING_FACE_CACHING,
+            model_max_length=1_000_000,   # << allow long sequences safely
+            truncation_side="right",      # << just in case any internal truncation is applied
+            use_fast=False,                 )
     return _TOKENIZER
 
 # =========================
@@ -198,6 +212,7 @@ def _embed_texts(docs: List[Document]) -> Tuple[List[str], List[Dict[str, Any]],
         return [], [], []
 
     model = _get_model()
+
     batch_size = 128 if DEVICE == "cuda" else (64 if DEVICE == "mps" else 32)
 
     embeddings = model.encode(
@@ -210,13 +225,7 @@ def _embed_texts(docs: List[Document]) -> Tuple[List[str], List[Dict[str, Any]],
 
     return texts, metadatas, embeddings
 
-# =========================
-# Chroma collection
-# =========================
-def _get_chroma_collection():
-    client = chromadb.PersistentClient(path=CHROMADB_CACHE_DIR)
-    collection = client.get_or_create_collection(name="knowledge_base")
-    return client, collection
+
 
 # =========================
 # Public API
@@ -227,12 +236,24 @@ def process_uploaded_file(uploaded_file) -> Tuple[str, str]:
     if "uploaded_files" not in st.session_state:
         st.session_state.uploaded_files = []
 
-    save_path = os.path.join(UPLOAD_FILE_DIR, f"{uploaded_file.file_id}_{uploaded_file.name}")
+    file_key = _file_key(uploaded_file)
+
+    save_path = os.path.join(UPLOAD_FILE_DIR, f"{file_key}_{uploaded_file.name}")
     with open(save_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
 
     st.session_state.uploaded_files.append(save_path)
     mime_type = uploaded_file.type
+
+    client, collection = _get_chroma_collection()
+
+    existing = collection.get(where={"file_key": file_key},  limit=1)
+    if existing and existing.get("ids"):
+        logger.info(f"🔁 Reusing cached index for file_key={file_key}")
+        # Update session so the chat page knows which file to query
+        st.session_state["original_filename"] = uploaded_file.name
+        st.session_state["last_file_id"] = file_key
+        return "Pass", uploaded_file.name
 
     logger.info("📄 Document processing started")
     docs = _load_as_documents(save_path, mime_type)
@@ -242,16 +263,24 @@ def process_uploaded_file(uploaded_file) -> Tuple[str, str]:
     if not texts:
         return "No content to index", mime_type
 
-    # sanitize + enrich metadata
+    # # sanitize + enrich metadata
     metadatas = [_scalarize_metadata(m) for m in metadatas]
     for i, m in enumerate(metadatas):
         m["chunk_index"] = i
+        m["file_key"] = file_key
+
     _validate_metadatas_for_chroma(metadatas)
 
-    client, collection = _get_chroma_collection()
+    #  build persistent IDs from file_key (not session-specific file_id)
+    ids = [f"{file_key}_doc_{i}" for i in range(len(texts))]
 
-    base = str(uploaded_file.file_id)
-    ids = [f"{base}_doc_{i}" for i in range(len(texts))]
+    
+
+    # base = str(uploaded_file.file_id)
+    # ids = [f"{base}_doc_{i}" for i in range(len(texts))]
+
+    for i, mid in enumerate(ids):
+        metadatas[i]["id"] = mid
 
     collection.add(
         ids=ids,
@@ -266,16 +295,20 @@ def process_uploaded_file(uploaded_file) -> Tuple[str, str]:
         pass
 
     logger.info("✅ Data added to vector DB. Ready for retrieval.")
-    return "Pass", "pass"
+    st.session_state["original_filename"] = uploaded_file.name
+    st.session_state["last_file_id"] = file_key
+    return "Pass", uploaded_file.name
 
-def cleanup_uploaded_files():
-    """Remove session-tracked files safely."""
-    if "uploaded_files" not in st.session_state:
-        return
-    for path in list(st.session_state.uploaded_files):
-        try:
-            if os.path.isfile(path):
-                os.remove(path)
-        except Exception:
-            pass
-    st.session_state.uploaded_files.clear()
+    # return "Pass", "pass"
+
+# def cleanup_uploaded_files():
+#     """Remove session-tracked files safely."""
+#     if "uploaded_files" not in st.session_state:
+#         return
+#     for path in list(st.session_state.uploaded_files):
+#         try:
+#             if os.path.isfile(path):
+#                 os.remove(path)
+#         except Exception:
+#             pass
+#     st.session_state.uploaded_files.clear()

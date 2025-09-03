@@ -29,6 +29,8 @@ askmydb/
 │  │  ├─ llamaindex_sql.py        # LlamaIndex SQL query engine
 │  │  ├─ router.py                # choose LC vs LI; retry/fallback logic
 │  │  └─ guardrails.py            # read-only SQL checks, denylist, LLM critique
+│  │  └─ Retrivers/            # read-only SQL checks, denylist, LLM critique
+│  │    └─ text_embedding_retrivals.py            # read-only SQL checks, denylist, LLM critique
 │  ├─ nlp/
 │  │  ├─ rephrase.py              # clarifying question, fill-in missing filters
 │  │  └─ column_synonyms.py       # mapping “revenue”->table.column using stats
@@ -44,6 +46,7 @@ askmydb/
 │     ├─ sql_safety.py            # sqlglot parsing, SELECT-only, EXPLAIN checks
 │     ├─ sampling.py              # fetch top-N values for columns (prompting aid)
 │     └─ logging.py               # structlog/loguru setup
+│     └─ chromadb.py               # structlog/loguru setup
 ├─ tests/
 │  ├─ test_sql_safety.py
 │  ├─ test_router.py
