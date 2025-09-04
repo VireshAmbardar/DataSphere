@@ -274,11 +274,6 @@ def process_uploaded_file(uploaded_file) -> Tuple[str, str]:
     #  build persistent IDs from file_key (not session-specific file_id)
     ids = [f"{file_key}_doc_{i}" for i in range(len(texts))]
 
-    
-
-    # base = str(uploaded_file.file_id)
-    # ids = [f"{base}_doc_{i}" for i in range(len(texts))]
-
     for i, mid in enumerate(ids):
         metadatas[i]["id"] = mid
 

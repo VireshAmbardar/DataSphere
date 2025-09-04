@@ -109,9 +109,23 @@ def _fetch_texts_metas_ids_for_file(file_id: Optional[str]) -> Tuple[List[str], 
 
 
 def _build_bm25_for_file(file_id: Optional[str]) -> BM25Retriever:
+    """
+    BM25 scores a document by:
+
+    Term frequency (tf): more occurrences of a query term → higher score (with diminishing returns).
+
+    Inverse document frequency (idf): rarer terms → higher weight.
+
+    Length normalization (b): longer docs don’t get unfair advantage.
+    Two main hyperparams:
+
+    k1 (typ. 1.2–2.0): tf saturation.
+
+    b (0–1): length normalization strength.
+    """
     texts, metadatas, _ = _fetch_texts_metas_ids_for_file(file_id)
     bm25 = BM25Retriever.from_texts(texts, metadatas=metadatas)
-    bm25.k = 20
+    bm25.k = 25
     return bm25
 
 
@@ -124,10 +138,24 @@ def _dense_candidates(
     mmr_lambda: float,
     file_id: Optional[str],
 ) -> List[LCDocument]:
-    """Dense search, then filter to a specific file_id (via metadata.id/_id prefix) if given."""
+    """Dense search, then filter to a specific file_id (via metadata.id/_id prefix) if given.
+    returns the top-k most similar docs to the query vector. Fast and simple; can be redundant (many near-duplicates).
+    max_marginal_relevance_search (MMR): first gathers a larger pool fetch_k (e.g., max(top_k*3, 40)), then greedily selects k docs that balance relevance and diversity:
+
+    Relevance = similarity(doc, query)
+
+    Diversity = dissimilarity(doc, already_selected_docs)
+
+    Trade-off is controlled by lambda_mult (λ):
+
+    λ close to 1.0 → prioritize relevance
+
+    λ close to 0.0 → prioritize diversity
+    This helps avoid “samey” chunks and usually improves downstream answer quality.
+    """
     if use_mmr:
         docs = vs.max_marginal_relevance_search(
-            query, k=top_k, fetch_k=max(top_k * 3, 40), lambda_mult=mmr_lambda
+            query, k=top_k, fetch_k=max(top_k * 3, 120), lambda_mult=mmr_lambda
         )
     else:
         docs = vs.similarity_search(query, k=top_k)
@@ -144,11 +172,14 @@ def _dense_candidates(
             out.append(d)
     return out
 
-
+_RERANKER = None
 def _init_reranker():
+    global _RERANKER
     if not _HAS_RERANKER:
         return None
-    return FlagReranker("BAAI/bge-reranker-v2-m3", use_fp16=True)
+    if _RERANKER is None:
+        _RERANKER = FlagReranker("BAAI/bge-reranker-v2-m3", use_fp16=True)
+    return _RERANKER
 
 
 def _apply_rerank(reranker, query: str, docs: List[LCDocument], top_n: int) -> List[LCDocument]:
@@ -161,6 +192,10 @@ def _apply_rerank(reranker, query: str, docs: List[LCDocument], top_n: int) -> L
 
 
 def _dedupe_keep_order(docs: List[LCDocument]) -> List[LCDocument]:
+    """
+    Remove duplicate (or near-duplicate) documents while preserving the original order.
+    It walks the list once, building a seen set of “keys” it has already emitted.
+    """
     seen = set()
     out: List[LCDocument] = []
     for d in docs:
@@ -198,7 +233,7 @@ def chroma_retrieve(
     *,
     top_k: int = 20,
     use_mmr: bool = True,
-    mmr_lambda: float = 0.5,
+    mmr_lambda: float = 0.7,
     file_id: Optional[str] = None,   # <- supported
     rerank_top_n: int = 8,
 ) -> str:
