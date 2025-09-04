@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import streamlit as st
-import torch
 from loguru import logger
 
 from core.global_settings import UPLOAD_FILE_DIR, HUGGING_FACE_CACHING
@@ -28,9 +27,14 @@ import hashlib
 
 #Chromadb client and collection
 from core.utils.chromadb import _get_chroma_collection
+import torch
 
 # Ensure upload dir exists
 os.makedirs(UPLOAD_FILE_DIR, exist_ok=True)
+
+# Tokenizer parallelism
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "true")
+
 
 
 # =========================
@@ -42,20 +46,49 @@ def _file_key(uploaded_file) -> str:
     data = uploaded_file.getvalue()  # Streamlit uploader supports this
     return hashlib.sha1(data).hexdigest()
 
+
+def _is_inference_tensor_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "version_counter" in msg and "inference tensor" in msg
 # =========================
 # OPTIMIZED: device pick
 # =========================
-def _pick_device() -> str:
+def _pick_device():
+    # CUDA (also covers ROCm builds exposed via torch.cuda)
     if torch.cuda.is_available():
-        return "cuda"
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return "mps"  # Apple Silicon
-    return "cpu"
+        # Nice free speed on Ampere+ for matmul (and optionally cuDNN)
+        torch.backends.cuda.matmul.allow_tf32 = True  # https://pytorch.org/docs/stable/notes/cuda.html#tf32-on-ampere
+        try:
+            torch.backends.cudnn.allow_tf32 = True   # https://pytorch.org/docs/stable/backends.html#torch-backends-cudnn-allow-tf32
+        except Exception:
+            pass
+        return torch.device("cuda"), "cuda"
 
-DEVICE = _pick_device()
-if DEVICE == "cpu":
-    # suppress harmless pin_memory warning when running on CPU
-    warnings.filterwarnings("ignore", message=".*pin_memory.*")
+    # DirectML (Windows, any DX12 GPU)
+    try:
+        import torch_directml  # pip install torch-directml
+        dml_dev = torch_directml.device()
+        return dml_dev, "directml"  # https://learn.microsoft.com/windows/ai/directml/pytorch-windows
+    except Exception:
+        pass
+
+    # Apple Silicon
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps"), "mps"
+
+    return torch.device("cpu"), "cpu"
+
+DEVICE, DEVICE_KIND = _pick_device()
+if DEVICE_KIND != "cuda":
+    warnings.filterwarnings("ignore", message=".*pin_memory.*")  # see PyTorch warning text
+
+
+if DEVICE_KIND == "cpu":
+    try:
+        torch.set_num_threads(min(8, max(1, os.cpu_count() or 1)))
+    except Exception:
+        pass
+
 logger.info(f"🚀 Using device: {DEVICE}")
 
 # =========================
@@ -80,13 +113,17 @@ def _get_model(model_name: str = "nomic-ai/nomic-embed-text-v1.5") -> SentenceTr
     return _MODEL_CACHE[model_name]
 
 def _get_tokenizer(name: str = "bert-base-uncased") -> AutoTokenizer:
-    """Singleton-ish loader for docling chunker tokenizer."""
     global _TOKENIZER
     if _TOKENIZER is None:
-        _TOKENIZER = AutoTokenizer.from_pretrained(name, cache_dir=HUGGING_FACE_CACHING,
-            model_max_length=1_000_000,   # << allow long sequences safely
-            truncation_side="right",      # << just in case any internal truncation is applied
-            use_fast=False,                 )
+        if HUGGING_FACE_CACHING:
+            os.makedirs(HUGGING_FACE_CACHING, exist_ok=True)
+        _TOKENIZER = AutoTokenizer.from_pretrained(
+            name,
+            cache_dir=HUGGING_FACE_CACHING or None,
+            model_max_length=1_000_000,
+            truncation_side="right",
+            use_fast=True,             # <- was False
+        )
     return _TOKENIZER
 
 # =========================
@@ -186,7 +223,7 @@ def _load_as_documents(save_path: str, mime_type: str) -> List[Document]:
     elif mime_type in ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]:
         converter = DocumentConverter()
         tokenizer = _get_tokenizer()  # cached
-        chunker = HybridChunker(tokenizer=tokenizer, max_tokens=512, merge_peers=True)
+        chunker = HybridChunker(tokenizer=tokenizer, max_tokens=1024, merge_peers=True)
 
         loader = DoclingLoader(
             file_path=[save_path],
@@ -213,17 +250,65 @@ def _embed_texts(docs: List[Document]) -> Tuple[List[str], List[Dict[str, Any]],
 
     model = _get_model()
 
-    batch_size = 128 if DEVICE == "cuda" else (64 if DEVICE == "mps" else 32)
+    # --- dynamic batch size ---
+    def _bsz():
+        if DEVICE_KIND == "cuda":
+            return int(os.getenv("EMBED_BATCH", "128"))
+        return int(os.getenv("EMBED_BATCH", "32"))     
+        
+    # Prefer multiple devices when available (v5+)
+    devices = None
+    if DEVICE_KIND == "cuda" and torch.cuda.device_count() > 1:
+        devices = [f"cuda:{i}" for i in range(torch.cuda.device_count())]
 
-    embeddings = model.encode(
-        texts,
-        batch_size=batch_size,
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-        show_progress_bar=True,
-    ).tolist()
+    def _encode(device_to_use):
+        try:
+            return model.encode(
+                texts,
+                device=(devices if (device_to_use == "auto" and devices) else (DEVICE if device_to_use == "auto" else device_to_use)),
+                chunk_size=512 if (device_to_use == "auto" and devices and len(devices) > 1) else None,
+                batch_size=_bsz(),
+                normalize_embeddings=True,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+            )
+        except TypeError:
+            # Older sentence-transformers fallback (no list-of-devices support)
+            if device_to_use == "auto" and devices and len(devices) > 1:
+                pool = model.start_multi_process_pool(devices)
+                try:
+                    return model.encode_multi_process(
+                        texts, pool, chunk_size=512, batch_size=_bsz(),
+                        normalize_embeddings=True, show_progress_bar=False
+                    )
+                finally:
+                    model.stop_multi_process_pool(pool)
+            return model.encode(
+                texts, batch_size=_bsz(),
+                normalize_embeddings=True, show_progress_bar=False,
+                convert_to_numpy=True,
+                device=(DEVICE if device_to_use == "auto" else device_to_use),
+            )
+    try:
+        # First try: your selected accelerator (CUDA / MPS / DirectML / CPU)
+        embeddings = _encode("auto")
+    except RuntimeError as e:
+        # Typical on DirectML (and sometimes other alt backends) due to inference tensors.
+        if _is_inference_tensor_error(e) or DEVICE_KIND == "directml":
+            logger.warning("⚠️ Falling back to CPU for embeddings due to backend inference-tensor error: %s", e)
+            # Conservative CPU batch size; make sure we don't inherit DML tensors
+            cpu_device = torch.device("cpu")
+            # Optional: cap threads on CPU
+            try:
+                torch.set_num_threads(min(8, max(1, os.cpu_count() or 1)))
+            except Exception:
+                pass
+            embeddings = _encode(cpu_device)
+        else:
+            raise
 
-    return texts, metadatas, embeddings
+    return texts, metadatas, embeddings.tolist()
+
 
 
 

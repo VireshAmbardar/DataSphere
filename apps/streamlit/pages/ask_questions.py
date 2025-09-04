@@ -41,7 +41,11 @@ if prompt := st.chat_input("Ask a question about your data..."):
             rerank_top_n=8,
         )
 
+    # print(response)
+    
     # Assistant bubble
     st.session_state.messages.append({"role": "assistant", "content": response})
+
+
     with st.chat_message("assistant"):
         st.markdown(response)

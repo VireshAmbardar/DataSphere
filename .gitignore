@@ -1,1 +1,7 @@
 .env
+
+.venv
+
+core/cache/chromadb_cache/
+core/cache/files/
+core/cache/hf_cache/

@@ -11,14 +11,13 @@ from core.upload_processing.upload_files import process_uploaded_file
 # ────────────────────────────────────────────────────────────────────────────────
 # Header
 # ────────────────────────────────────────────────────────────────────────────────
-st.title("Welcome to _DataSphere_:blue[cool]")
+st.title("Welcome to _DataSphere_:blue")
 
 st.markdown(
     """
     <h3 style='text-align: center; font-size: 24px;'>
-        Welcome to <b>AskMyDB</b> — a simple tool where you can connect your database, 
-        ask natural language questions, and generate insightful reports with charts 📊.<br>
-        Use the sidebar to navigate between <b>Connect</b>, <b>Ask</b>, <b>Reports</b>, and <b>Settings</b>.
+        Welcome to <b>AskMyDB</b> — a simple tool where you can Upload Your local File and, 
+        ask natural language questions, and generate insights.
     </h3>
     """,
     unsafe_allow_html=True,
@@ -44,8 +43,8 @@ items = [
     ("PDF", ":material/picture_as_pdf:"),
     ("DOCX", ":material/docs:"),
     ("CSV", ":material/csv:"),
-    ("SQL", ":material/database:"),
-    ("Postgres", ":material/database:"),
+    # ("SQL", ":material/database:"),
+    # ("Postgres", ":material/database:"),
 ]
 
 cols = st.columns(len(items))
