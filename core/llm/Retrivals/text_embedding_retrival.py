@@ -17,6 +17,8 @@ from FlagEmbedding import FlagReranker
 import torch
 import re
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
+
 # -------------------------
 # Device normalize (works whether _pick_device returns a torch.device,
 # a (device, kind) tuple, a string, or a DirectML device object)

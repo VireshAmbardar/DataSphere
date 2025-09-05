@@ -1,4 +1,6 @@
 import streamlit as st
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
+
 from core.llm.Retrivals.text_embedding_retrival import chroma_retrieve
 
 st.set_page_config(page_title="Ask Questions", page_icon="💬", layout="wide")
