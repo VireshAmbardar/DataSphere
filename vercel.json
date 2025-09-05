@@ -1,0 +1,5 @@
+{
+  "installCommand": "python3 -m venv .venv && .venv/bin/pip install poetry==2.0.1 && ln -s -t /usr/local/bin $(pwd)/.venv/bin/poetry && poetry install",
+  "buildCommand": "poetry run streamlit run apps/streamlit/DataSphere.py --server.port 8051 --server.address 0.0.0.0",
+  "outputDirectory": "public"
+}
