@@ -4,7 +4,7 @@ askmydb/
 │     ├─ app.py                   # main entry: sidebar > connect > ask > report
 │     ├─ pages/
 │     │  ├─ 1_🔌_Connect_DB.py
-│     │  ├─ 2_❓_Ask_Questions.py
+│     │  ├─ 2_Ask_Questions.py
 │     │  ├─ 3_📊_Reports.py
 │     │  └─ 4_⚙️_Settings.py
 │     └─ components/              # small UI widgets

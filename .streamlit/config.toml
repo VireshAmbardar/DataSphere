@@ -1,10 +1,17 @@
 [server]
-runOnSave = true
-maxUploadSize = 10 
 headless = true
-# port = ${PORT:-8501}
 enableCORS = false
 enableXsrfProtection = true
+maxUploadSize = 10
+runOnSave = true
+address = "0.0.0.0"
+#PORT=8501
 
 [theme]
 base = "light"
+
+
+
+
+
+
