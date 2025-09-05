@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 import os
+import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_chroma import Chroma
