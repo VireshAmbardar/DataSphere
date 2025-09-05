@@ -2,6 +2,12 @@ import os
 import sys
 import streamlit as st
 
+try:
+    import pysqlite3, sys
+    sys.modules["sqlite3"] = pysqlite3
+except Exception:
+    pass
+
 # make repo root importable
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
