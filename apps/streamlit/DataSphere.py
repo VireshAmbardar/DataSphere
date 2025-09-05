@@ -8,6 +8,20 @@ try:
 except Exception:
     pass
 
+# ---- Safe thread + parallelism settings ----
+# Streamlit Cloud has ~1-2 cores. Prevent oversubscription crashes.
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+# Clamp thread pools to a sane limit
+max_threads = min(4, max(1, os.cpu_count() or 1))
+os.environ["OMP_NUM_THREADS"] = str(max_threads)
+os.environ["OPENBLAS_NUM_THREADS"] = str(max_threads)
+os.environ["MKL_NUM_THREADS"] = str(max_threads)
+os.environ["VECLIB_MAXIMUM_THREADS"] = str(max_threads)
+os.environ["NUMEXPR_NUM_THREADS"] = str(max_threads)
+
+
+
 # make repo root importable
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 

@@ -86,14 +86,20 @@ class SentenceTransformerEmbeddings(Embeddings):
             else:
                 self._bsz = 32   # mps/directml/cpu default
 
+        # detect Streamlit Cloud
+        self.is_cloud = os.environ.get("STREAMLIT_RUNTIME") == "1"
+
         # Multi-GPU only for CUDA
         self._devices: Optional[List[str]] = None
         if DEVICE_KIND == "cuda" and torch.cuda.device_count() > 1:
             self._devices = [f"cuda:{i}" for i in range(torch.cuda.device_count())]
         elif DEVICE_KIND == "cpu":
-            # light CPU parallelism; don’t oversubscribe
-            workers = min(8, max(2, (os.cpu_count() or 2) // 2))
-            self._devices = ["cpu"] * workers
+            if self.is_cloud:
+                # Streamlit Cloud → keep it safe
+                self._devices = ["cpu"]
+            else:
+                workers = min(8, max(2, (os.cpu_count() or 2) // 2))
+                self._devices = ["cpu"] * workers
 
     def _encode_once(self, texts: List[str], device_spec) -> List[List[float]]:
         """One attempt to encode on a given device (or 'auto' to use configured)."""

@@ -1,8 +1,8 @@
 import streamlit as st
 from core.llm.Retrivals.text_embedding_retrival import chroma_retrieve
 
-st.set_page_config(page_title="Ask Questions", page_icon="🐕‍🦺", layout="wide")
-st.title("💬 AskMyDB - Chat with your Data")
+st.set_page_config(page_title="Ask Questions", page_icon="💬", layout="wide")
+st.title("Chat with your Data 📃")
 
 # Init history
 if "messages" not in st.session_state:
