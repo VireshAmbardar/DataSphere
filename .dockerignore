@@ -1,0 +1,22 @@
+.git
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv
+.cache
+.mypy_cache
+.pytest_cache
+dist
+build
+
+
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Project caches
+core/cache/chromadb_cache/
+core/cache/files/
+core/cache/hf_cache/

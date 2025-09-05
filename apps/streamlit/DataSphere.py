@@ -32,9 +32,10 @@ st.markdown(
 # Session defaults (kept minimal; process_uploaded_file will set these too)
 # ────────────────────────────────────────────────────────────────────────────────
 st.session_state.setdefault("selected_source", None)
-st.session_state.setdefault("last_file_id", None)          # will hold file_key
+st.session_state.setdefault("last_file_id", None)   
 st.session_state.setdefault("original_filename", None)
 st.session_state.setdefault("processed_file", None)
+st.session_state.setdefault("process_state", None)
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Source selection
@@ -73,13 +74,18 @@ if selected in UPLOAD_MAP:
         # 2) check Chroma for existing chunks (where={"file_key": file_key})
         # 3) skip parsing/embedding if already cached
         # 4) set session: original_filename, last_file_id (file_key)
-        status, fname = process_uploaded_file(uploaded_file)
-
+        with st.spinner("Processing your file… this may take a moment"):
+            st.session_state["process_state"] = "processing"
+            status, fname = process_uploaded_file(uploaded_file)
+        
         if status == "Pass":
             st.session_state["processed_file"] = fname  # human-friendly name
+            st.session_state["process_state"] = "done"
+            st.toast("Indexed successfully ✅")
             # navigate to chat page
             st.switch_page("pages/ask_questions.py")
         else:
+            st.session_state["process_state"] = "error"
             st.error(f"Failed to process file: {status} ({fname})")
 
 else:

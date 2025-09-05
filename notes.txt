@@ -2,3 +2,8 @@ streamlit run apps/streamlit/DataSphere.py --server.port 8501
 
 # embedding model
 https://huggingface.co/nomic-ai/nomic-embed-text-v1.5
+
+# build a docker image
+docker build -t datasphere:poetry-2.0.1 .
+
+docker run --rm -p 8501:8501 -e PORT=8501 datasphere:poetry-2.0.1

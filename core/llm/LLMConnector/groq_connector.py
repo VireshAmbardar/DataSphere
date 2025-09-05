@@ -86,7 +86,7 @@ def response_generator(
     out = []
     for delta in chunks:
         piece = delta.choices[0].delta.content or ""
-        print(piece, end="", flush=True)  # optional live echo
+        # print(piece, end="", flush=True)  # optional live echo
         out.append(piece)
     print()  # newline after stream
     return "".join(out)
