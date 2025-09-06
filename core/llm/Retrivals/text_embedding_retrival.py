@@ -19,6 +19,7 @@ import torch
 import re
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 # -------------------------
 # Device normalize (works whether _pick_device returns a torch.device,
@@ -90,54 +91,90 @@ class SentenceTransformerEmbeddings(Embeddings):
                 self._bsz = 32   # mps/directml/cpu default
 
         # detect Streamlit Cloud
-        self.is_cloud = os.environ.get("STREAMLIT_RUNTIME") == "1"
+        self.force_single = os.getenv("ST_FORCE_CPU_SINGLE", "0") == "1"
 
-        # Multi-GPU only for CUDA
-        self._devices: Optional[List[str]] = None
-        if DEVICE_KIND == "cuda" and torch.cuda.device_count() > 1:
-            self._devices = [f"cuda:{i}" for i in range(torch.cuda.device_count())]
-        elif DEVICE_KIND == "cpu":
-            if self.is_cloud:
-                # Streamlit Cloud → keep it safe
-                self._devices = ["cpu"]
+        # Try to detect Streamlit Cloud (STREAMLIT_SERVER_PORT is present there)
+        looks_like_streamlit = "STREAMLIT_SERVER_PORT" in os.environ
+        self.is_cloud = self.force_single or looks_like_streamlit
+
+        # always single device on cloud
+        if self.is_cloud or not torch.cuda.is_available():
+            self._devices = None   # IMPORTANT: no multi-device list → no multi-process
+            try:
+                # keep CPU threads modest on small sandboxes
+                torch.set_num_threads(min(4, max(1, (os.cpu_count() or 2) // 2)))
+            except Exception:
+                pass
+        else:
+            # CUDA single device or multi-GPU
+            if torch.cuda.device_count() > 1:
+                self._devices = [f"cuda:{i}" for i in range(torch.cuda.device_count())]
             else:
-                workers = min(8, max(2, (os.cpu_count() or 2) // 2))
-                self._devices = ["cpu"] * workers
+                self._devices = None
+       
+        # self._devices: Optional[List[str]] = None
+        # if DEVICE_KIND == "cuda" and torch.cuda.device_count() > 1:
+        #     self._devices = [f"cuda:{i}" for i in range(torch.cuda.device_count())]
+        # elif DEVICE_KIND == "cpu":
+        #     if self.is_cloud:
+              
+        #         self._devices = ["cpu"]
+        #     else:
+        #         workers = min(8, max(2, (os.cpu_count() or 2) // 2))
+        #         self._devices = ["cpu"] * workers
 
     def _encode_once(self, texts: List[str], device_spec) -> List[List[float]]:
         """One attempt to encode on a given device (or 'auto' to use configured)."""
         # SentenceTransformers v5+ accepts device=str|list[str]|torch.device
+        target_device = (
+            DEVICE if device_spec == "auto" else device_spec
+        )
+
         try:
             embeddings = self.model.encode(
                 texts,
-                device=(self._devices if (device_spec == "auto" and self._devices)
-                        else (DEVICE if device_spec == "auto" else device_spec)),
+                device=target_device,
                 chunk_size=512 if (device_spec == "auto" and self._devices and len(self._devices) > 1) else None,
                 batch_size=self._bsz,
                 normalize_embeddings=True,
                 show_progress_bar=False,
                 convert_to_numpy=True,
             )
-        except TypeError:
+
+        except RuntimeError as e:
             # Older ST fallback: explicit multi-process pool
-            if device_spec == "auto" and self._devices and len(self._devices) > 1:
-                pool = self.model.start_multi_process_pool(self._devices)
+            # if device_spec == "auto" and self._devices and len(self._devices) > 1:
+            #     pool = self.model.start_multi_process_pool(self._devices)
+            #     try:
+            #         embeddings = self.model.encode_multi_process(
+            #             texts, pool, chunk_size=512, batch_size=self._bsz,
+            #             normalize_embeddings=True, show_progress_bar=False
+            #         )
+            #     finally:
+            #         self.model.stop_multi_process_pool(pool)
+            # else:
+            #     embeddings = self.model.encode(
+            #         texts,
+            #         device=(DEVICE if device_spec == "auto" else device_spec),
+            #         batch_size=self._bsz,
+            #         normalize_embeddings=True,
+            #         show_progress_bar=False,
+            #         convert_to_numpy=True,
+            #     )
+            if _is_inference_tensor_error(e) or DEVICE_KIND == "directml":
                 try:
-                    embeddings = self.model.encode_multi_process(
-                        texts, pool, chunk_size=512, batch_size=self._bsz,
-                        normalize_embeddings=True, show_progress_bar=False
-                    )
-                finally:
-                    self.model.stop_multi_process_pool(pool)
-            else:
+                    torch.set_num_threads(min(4, max(1, (os.cpu_count() or 2) // 2)))
+                except Exception:
+                    pass
                 embeddings = self.model.encode(
                     texts,
-                    device=(DEVICE if device_spec == "auto" else device_spec),
+                    device=torch.device("cpu"),
                     batch_size=self._bsz,
                     normalize_embeddings=True,
                     show_progress_bar=False,
                     convert_to_numpy=True,
                 )
+            
         return embeddings.tolist()
 
     def _encode(self, texts: List[str]) -> List[List[float]]:
@@ -334,7 +371,7 @@ def _apply_rerank(reranker: FlagReranker, query: str, docs: List[LCDocument], to
     if not reranker or not docs:
         return docs[:top_n]
     pairs = [(query, d.page_content) for d in docs]
-    batch_size = int(os.getenv("RERANK_BATCH", "64"))
+    batch_size = int(os.getenv("RERANK_BATCH", "16"))
     # FlagReranker supports batched compute_score(list_of_pairs, batch_size=...)
     scores = reranker.compute_score(pairs, batch_size=batch_size)
     ranked = sorted(zip(docs, scores), key=lambda x: x[1], reverse=True)
