@@ -103,7 +103,7 @@ if selected in UPLOAD_MAP:
             st.session_state["process_state"] = "done"
             st.toast("Indexed successfully ✅")
             # navigate to chat page
-            st.switch_page("pages/ask_questions.py")
+            st.switch_page("pages/chat.py")
         else:
             st.session_state["process_state"] = "error"
             st.error(f"Failed to process file: {status} ({fname})")
