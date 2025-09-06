@@ -31,12 +31,12 @@ from core.upload_processing.upload_files import process_uploaded_file
 # ────────────────────────────────────────────────────────────────────────────────
 # Header
 # ────────────────────────────────────────────────────────────────────────────────
-st.title("Welcome to _DataSphere_:blue")
+st.title("Welcome to :blue[_DataSphere_]",width="content")
 
 st.markdown(
     """
     <h3 style='text-align: center; font-size: 24px;'>
-        Welcome to <b>AskMyDB</b> — a simple tool where you can Upload Your local File and, 
+        Welcome to <b>DataSphere</b> — a simple tool where you can Upload Your local File and, 
         ask natural language questions, and generate insights.
     </h3>
     """,

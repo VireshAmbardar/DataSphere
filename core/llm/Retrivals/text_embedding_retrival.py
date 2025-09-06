@@ -354,28 +354,25 @@ def _get_reranker() -> FlagReranker:
         _RERANKER = FlagReranker(model_name, use_fp16=use_fp16)
     return _RERANKER
 
-def _safe_rerank_scores(reranker: FlagReranker, pairs: List[Tuple[str, str]], batch_size: int) -> List[float]:
+def _apply_rerank(reranker: FlagReranker, pairs: List[Tuple[str, str]], batch_size: int,
+                fused:List[float] ,rerank_top_n:int ) -> List[float]:
     try:
-        return reranker.compute_score(pairs, batch_size=batch_size)
+        scores =  reranker.compute_score(pairs, batch_size=batch_size)
     except RuntimeError as e:
         # If a backend trips over inference tensors, retry on CPU by
         # clearing CUDA visibility for this process (best-effort) and re-instantiating
         if _is_inference_tensor_error(e) or DEVICE_KIND == "directml":
             os.environ["CUDA_VISIBLE_DEVICES"] = ""  # hint CPU
             rr = FlagReranker(os.getenv("RERANK_MODEL", "BAAI/bge-reranker-v2-m3"), use_fp16=False)
-            return rr.compute_score(pairs, batch_size=batch_size)
-        raise
+            scores = rr.compute_score(pairs, batch_size=batch_size)
+    
+    ranked = sorted(zip(fused, scores), key=lambda x: x[1], reverse=True)
+    top_docs = [d for d, _ in ranked[:rerank_top_n]]
+
+    return top_docs
 
 
-def _apply_rerank(reranker: FlagReranker, query: str, docs: List[LCDocument], top_n: int) -> List[LCDocument]:
-    if not reranker or not docs:
-        return docs[:top_n]
-    pairs = [(query, d.page_content) for d in docs]
-    batch_size = int(os.getenv("RERANK_BATCH", "16"))
-    # FlagReranker supports batched compute_score(list_of_pairs, batch_size=...)
-    scores = reranker.compute_score(pairs, batch_size=batch_size)
-    ranked = sorted(zip(docs, scores), key=lambda x: x[1], reverse=True)
-    return [d for d, _ in ranked[:top_n]]
+
 
 
 # -------------------------
@@ -440,10 +437,7 @@ def chroma_retrieve(
     reranker = _get_reranker()
     pairs = [(query, d.page_content) for d in fused]
     batch_size = int(os.getenv("RERANK_BATCH", "64"))
-    scores = _safe_rerank_scores(reranker, pairs, batch_size=batch_size)
-
-    ranked = sorted(zip(fused, scores), key=lambda x: x[1], reverse=True)
-    top_docs = [d for d, _ in ranked[:rerank_top_n]]
+    top_docs = _apply_rerank(reranker, pairs, batch_size,fused,rerank_top_n)
 
     return response_generator(
         user_query = query,
