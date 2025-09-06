@@ -15,4 +15,4 @@ core/cache/chromadb_cache/
 core/cache/files/
 core/cache/hf_cache/
 
-/.streamlit/secrets.toml
+/.streamlit/secrets.toml/.streamlit/secrets.toml
